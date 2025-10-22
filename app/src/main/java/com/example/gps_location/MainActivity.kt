@@ -27,10 +27,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -42,6 +40,8 @@ import androidx.core.content.ContextCompat
 class MainActivity : ComponentActivity(), LocationListener {
 
     private val _locationData = mutableStateOf<Location?>(null)
+    private val _locationTracking = mutableStateOf(false)
+    private val _locationName = mutableStateOf("")
     private lateinit var locationManager: LocationManager
     private val LOCATION_PERMISSION_REQUEST_CODE = 1001
 
@@ -49,15 +49,37 @@ class MainActivity : ComponentActivity(), LocationListener {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent{
-        GpsLocationFunctionality(location = _locationData.value)
+            val tracking = _locationTracking.value
+
+            // Efekt śledzący zmiany stanu śledzenia lokalizacji
+            LaunchedEffect(tracking) {
+                if (tracking) {
+                    startLocationUpdates()
+                } else {
+                    stopLocationUpdates() // Dodajemy tę funkcję poniżej
+                }
+            }
+
+
+
+        GpsLocationFunctionality(location = _locationData.value,
+            locationTracking = _locationTracking.value,
+            onLocationTrackingChanged = { _locationTracking.value = it },
+            name = _locationName.value,
+            onNameChanged = { _locationName.value = it })
         }
 
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         checkLocationPermission()
     }
 
+    private fun stopLocationUpdates() {
+        locationManager.removeUpdates(this)
+    }
+
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
+        if (!_locationTracking.value) return
         locationManager.requestLocationUpdates(
             LocationManager.GPS_PROVIDER,
             5000L, // co 5 sekund
@@ -118,10 +140,12 @@ class MainActivity : ComponentActivity(), LocationListener {
         }
     }
     @Composable
-    fun GpsLocationFunctionality(location: Location?)
+    fun GpsLocationFunctionality(location: Location?,
+                                 locationTracking: Boolean,
+                                 onLocationTrackingChanged: (Boolean) -> Unit,
+                                 name: String,
+                                 onNameChanged: (String) -> Unit)
     {
-        var location_tracking by remember { mutableStateOf(false) }
-        var name by remember {mutableStateOf("")}
         Column (verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxSize().background(color = Color.DarkGray).padding(20.dp)) {
             Row (modifier = Modifier.fillMaxWidth().padding(top = 20.dp)) {
                 Column {
@@ -137,7 +161,7 @@ class MainActivity : ComponentActivity(), LocationListener {
                     Row (modifier = Modifier.fillMaxWidth()) {
                         //Pole Nazwy
                         OutlinedTextField(value = name,
-                            onValueChange = {name = it},
+                            onValueChange = {onNameChanged(it)},
                             placeholder = { Text("Name Here..") }, singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
@@ -191,13 +215,15 @@ class MainActivity : ComponentActivity(), LocationListener {
             Row ( horizontalArrangement = Arrangement.Center,modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp)) {
 
                 Button(
-                    onClick = {location_tracking = !location_tracking},
+                    onClick = {onLocationTrackingChanged(!locationTracking)},
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (location_tracking == true) {Color(10, 130, 220)}
+                        containerColor = if (locationTracking) {Color(10, 130, 220)}
                         else Color.Gray,
                         ),
                     modifier = Modifier.height(60.dp).width(200.dp)) {
-                Text(text = if (location_tracking == true) {"STOP"} else "START", color = if (location_tracking == true) {Color.White} else Color.LightGray, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Text(text = if (locationTracking) {"STOP"} else "START",
+                    color = if (locationTracking)
+                    {Color.White} else Color.LightGray, fontWeight = FontWeight.Bold, fontSize = 20.sp)
                 }
 
             }
