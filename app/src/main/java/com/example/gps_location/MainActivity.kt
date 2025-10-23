@@ -6,6 +6,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -36,6 +37,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.android.volley.DefaultRetryPolicy
+import com.android.volley.toolbox.StringRequest
+import com.android.volley.toolbox.Volley
 
 class MainActivity : ComponentActivity(), LocationListener {
 
@@ -51,12 +55,11 @@ class MainActivity : ComponentActivity(), LocationListener {
         setContent{
             val tracking = _locationTracking.value
 
-            // Efekt śledzący zmiany stanu śledzenia lokalizacji
             LaunchedEffect(tracking) {
                 if (tracking) {
                     startLocationUpdates()
                 } else {
-                    stopLocationUpdates() // Dodajemy tę funkcję poniżej
+                    stopLocationUpdates()
                 }
             }
 
@@ -118,6 +121,55 @@ class MainActivity : ComponentActivity(), LocationListener {
 
     override fun onLocationChanged(location: Location) {
         _locationData.value = location
+
+        val locname = "test1"
+
+        if (locname.isNotEmpty()) {
+            sendLocationToServer(location, locname)
+        }
+    }
+
+    private fun sendLocationToServer(location: Location, locname: String) {
+        val url = "http://gpslocation.fcomms.website/index.php"
+
+        val queue = Volley.newRequestQueue(this)
+
+        val request = object : StringRequest(
+            Method.POST, url,
+            { response ->
+                Log.d("API_RESPONSE", "Odpowiedź: $response")
+                Toast.makeText(this, "Serwer: $response", Toast.LENGTH_SHORT).show()
+            },
+            { error ->
+                Log.e("API_ERROR", "Volley error: ${error.message}", error)
+                Toast.makeText(this, "Błąd sieci: ${error.message}", Toast.LENGTH_SHORT).show()
+            }
+        ) {
+            override fun getParams(): MutableMap<String, String> {
+                val params = HashMap<String, String>()
+                params["name"] = locname
+                params["latitude"] = location.latitude.toString()
+                params["longitude"] = location.longitude.toString()
+                params["altitude"] = location.altitude.toString()
+                params["bearing"] = location.bearing.toString()
+                params["time"] = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                    .format(java.util.Date(location.time))
+                return params
+            }
+
+            override fun getBodyContentType(): String {
+                return "application/x-www-form-urlencoded; charset=UTF-8"
+            }
+        }
+
+        // Opcjonalnie ustaw timeout (domyślnie 2.5 sekundy)
+        request.retryPolicy = DefaultRetryPolicy(
+            5000,  // timeout 5 sekund
+            DefaultRetryPolicy.DEFAULT_MAX_RETRIES,
+            DefaultRetryPolicy.DEFAULT_BACKOFF_MULT
+        )
+
+        queue.add(request)
     }
 
 
