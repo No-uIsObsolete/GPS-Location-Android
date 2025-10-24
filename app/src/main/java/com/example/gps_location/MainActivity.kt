@@ -163,7 +163,7 @@ class MainActivity : ComponentActivity(), LocationListener {
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
-        val url = "http://gpslocation.fcomms.website/index.php"
+        val url = "http://gpslocation.fcomms.website/api.php"
         val volleyQueue = Volley.newRequestQueue(this)
 
         val params = HashMap<String, String>().apply {
