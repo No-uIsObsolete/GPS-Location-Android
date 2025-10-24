@@ -37,9 +37,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.android.volley.DefaultRetryPolicy
 import com.android.volley.toolbox.StringRequest
 import com.android.volley.toolbox.Volley
+
+
+data class QueuedLocation(
+    val name: String,
+    val latitude: Double,
+    val longitude: Double,
+    val altitude: Double,
+    val bearing: Float,
+    val time: String
+)
 
 class MainActivity : ComponentActivity(), LocationListener {
 
@@ -48,6 +57,27 @@ class MainActivity : ComponentActivity(), LocationListener {
     private val _locationName = mutableStateOf("")
     private lateinit var locationManager: LocationManager
     private val LOCATION_PERMISSION_REQUEST_CODE = 1001
+    private val locationQueue = mutableListOf<QueuedLocation>()
+    private var isSending = false
+
+    private fun enqueueLocation(location: Location, locname: String) {
+        val timeFormatted = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+            .format(java.util.Date(location.time))
+
+        val item = QueuedLocation(
+            name = locname,
+            latitude = location.latitude,
+            longitude = location.longitude,
+            altitude = location.altitude,
+            bearing = location.bearing,
+            time = timeFormatted
+        )
+
+        locationQueue.add(item)
+        Log.d("QUEUE", "Dodano do kolejki (${locationQueue.size}): $item")
+
+        tryToSendQueuedLocations()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -86,7 +116,7 @@ class MainActivity : ComponentActivity(), LocationListener {
         locationManager.requestLocationUpdates(
             LocationManager.GPS_PROVIDER,
             5000L, // co 5 sekund
-            1f, // co 1 metr
+            0f,
             this
         )
     }
@@ -121,55 +151,73 @@ class MainActivity : ComponentActivity(), LocationListener {
 
     override fun onLocationChanged(location: Location) {
         _locationData.value = location
-
-        val locname = "test1"
+        val locname = _locationName.value
 
         if (locname.isNotEmpty()) {
-            sendLocationToServer(location, locname)
+            enqueueLocation(location, locname)
         }
     }
 
-    private fun sendLocationToServer(location: Location, locname: String) {
+    private fun sendLocationToServer(
+        item: QueuedLocation,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
         val url = "http://gpslocation.fcomms.website/index.php"
+        val volleyQueue = Volley.newRequestQueue(this)
 
-        val queue = Volley.newRequestQueue(this)
+        val params = HashMap<String, String>().apply {
+            put("name", item.name)
+            put("latitude", item.latitude.toString())
+            put("longitude", item.longitude.toString())
+            put("altitude", item.altitude.toString())
+            put("bearing", item.bearing.toString())
+            put("time", item.time)
+        }
 
         val request = object : StringRequest(
             Method.POST, url,
-            { response ->
-                Log.d("API_RESPONSE", "Odpowiedź: $response")
-                Toast.makeText(this, "Serwer: $response", Toast.LENGTH_SHORT).show()
+            {
+                onSuccess()
             },
             { error ->
-                Log.e("API_ERROR", "Volley error: ${error.message}", error)
-                Toast.makeText(this, "Błąd sieci: ${error.message}", Toast.LENGTH_SHORT).show()
+                onError(error.message ?: "Nieznany błąd")
             }
         ) {
-            override fun getParams(): MutableMap<String, String> {
-                val params = HashMap<String, String>()
-                params["name"] = locname
-                params["latitude"] = location.latitude.toString()
-                params["longitude"] = location.longitude.toString()
-                params["altitude"] = location.altitude.toString()
-                params["bearing"] = location.bearing.toString()
-                params["time"] = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
-                    .format(java.util.Date(location.time))
-                return params
-            }
-
-            override fun getBodyContentType(): String {
-                return "application/x-www-form-urlencoded; charset=UTF-8"
-            }
+            override fun getParams(): MutableMap<String, String> = params
+            override fun getBodyContentType(): String =
+                "application/x-www-form-urlencoded; charset=UTF-8"
         }
 
-        // Opcjonalnie ustaw timeout (domyślnie 2.5 sekundy)
-        request.retryPolicy = DefaultRetryPolicy(
-            5000,  // timeout 5 sekund
-            DefaultRetryPolicy.DEFAULT_MAX_RETRIES,
-            DefaultRetryPolicy.DEFAULT_BACKOFF_MULT
-        )
+        volleyQueue.add(request)
+    }
+    private fun tryToSendQueuedLocations() {
+        if (isSending || locationQueue.isEmpty()) return
+        isSending = true
 
-        queue.add(request)
+        fun sendNext() {
+            if (locationQueue.isEmpty()) {
+                isSending = false
+                Log.d("QUEUE", "Wszystkie dane z kolejki wysłane.")
+                return
+            }
+
+            val item = locationQueue.first()
+
+            sendLocationToServer(item,
+                onSuccess = {
+                    Log.d("QUEUE_SEND", "Wysłano: ${item.name}")
+                    locationQueue.removeAt(0)
+                    sendNext() // wysyłaj kolejny
+                },
+                onError = { error ->
+                    Log.e("QUEUE_ERROR", "Błąd przy wysyłce: $error")
+                    isSending = false // zatrzymaj i spróbuj później
+                }
+            )
+        }
+
+        sendNext()
     }
 
 
