@@ -115,8 +115,8 @@ class MainActivity : ComponentActivity(), LocationListener {
         if (!_locationTracking.value) return
         locationManager.requestLocationUpdates(
             LocationManager.GPS_PROVIDER,
-            5000L, // co 5 sekund
-            0f,
+            1000L, // sekundy
+            2f, //metry
             this
         )
     }
