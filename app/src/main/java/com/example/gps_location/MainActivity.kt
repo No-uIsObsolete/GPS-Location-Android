@@ -1,6 +1,7 @@
 package com.example.gps_location
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
@@ -37,11 +38,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import com.android.volley.toolbox.StringRequest
 import com.android.volley.toolbox.Volley
 
 
 data class QueuedLocation(
+    val id: String,
     val name: String,
     val latitude: Double,
     val longitude: Double,
@@ -51,7 +54,6 @@ data class QueuedLocation(
 )
 
 class MainActivity : ComponentActivity(), LocationListener {
-
     private val _locationData = mutableStateOf<Location?>(null)
     private val _locationTracking = mutableStateOf(false)
     private val _locationName = mutableStateOf("")
@@ -60,11 +62,13 @@ class MainActivity : ComponentActivity(), LocationListener {
     private val locationQueue = mutableListOf<QueuedLocation>()
     private var isSending = false
 
-    private fun enqueueLocation(location: Location, locname: String) {
+    private var userId: String = ""
+    private fun enqueueLocation(location: Location, locname: String, userId: String) {
         val timeFormatted = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
             .format(java.util.Date(location.time))
 
         val item = QueuedLocation(
+            id = userId,
             name = locname,
             latitude = location.latitude,
             longitude = location.longitude,
@@ -82,6 +86,10 @@ class MainActivity : ComponentActivity(), LocationListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val prefs = getSharedPreferences("user_prefs", MODE_PRIVATE)
+        userId = prefs.getString("id", "") ?: ""
+        val username = prefs.getString("username", "Nieznany użytkownik")
+        val email = prefs.getString("email", "brak emaila")
         setContent{
             val tracking = _locationTracking.value
 
@@ -95,11 +103,14 @@ class MainActivity : ComponentActivity(), LocationListener {
 
 
 
-        GpsLocationFunctionality(location = _locationData.value,
+        GpsLocationFunctionality(
+            location = _locationData.value,
             locationTracking = _locationTracking.value,
             onLocationTrackingChanged = { _locationTracking.value = it },
             name = _locationName.value,
-            onNameChanged = { _locationName.value = it })
+            onNameChanged = { _locationName.value = it },
+            user = username,
+            userEmail = email)
         }
 
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
@@ -133,11 +144,9 @@ class MainActivity : ComponentActivity(), LocationListener {
         ) == PackageManager.PERMISSION_GRANTED
 
         if (fineLocationGranted && coarseLocationGranted) {
-            // Masz już uprawnienia – możesz pobierać lokalizację
             Toast.makeText(this, "Uprawnienia lokalizacji przyznane", Toast.LENGTH_SHORT).show()
             startLocationUpdates()
         } else {
-            // Poproś użytkownika o uprawnienia
             ActivityCompat.requestPermissions(
                 this,
                 arrayOf(
@@ -152,9 +161,13 @@ class MainActivity : ComponentActivity(), LocationListener {
     override fun onLocationChanged(location: Location) {
         _locationData.value = location
         val locname = _locationName.value
+        //Log.d("LOCATION", "onLocationChanged: locname='$locname', userId='$userId'")
 
-        if (locname.isNotEmpty()) {
-            enqueueLocation(location, locname)
+
+        if (locname.isNotEmpty() && userId.isNotEmpty()) {
+            enqueueLocation(location, locname, userId)
+        } else {
+            //Log.d("LOCATION", "Nie dodano do kolejki - brak nazwy lub id")
         }
     }
 
@@ -168,6 +181,7 @@ class MainActivity : ComponentActivity(), LocationListener {
         val volleyQueue = Volley.newRequestQueue(this)
 
         val params = HashMap<String, String>().apply {
+            put("id", item.id)
             put("name", item.name)
             put("latitude", item.latitude.toString())
             put("longitude", item.longitude.toString())
@@ -189,7 +203,7 @@ class MainActivity : ComponentActivity(), LocationListener {
             override fun getBodyContentType(): String =
                 "application/x-www-form-urlencoded; charset=UTF-8"
         }
-
+        //Log.d("QUEUE_PARAMS", "Wysyłam: $params")
         volleyQueue.add(request)
     }
     private fun tryToSendQueuedLocations() {
@@ -241,15 +255,62 @@ class MainActivity : ComponentActivity(), LocationListener {
         }
     }
     @Composable
-    fun GpsLocationFunctionality(location: Location?,
-                                 locationTracking: Boolean,
-                                 onLocationTrackingChanged: (Boolean) -> Unit,
-                                 name: String,
-                                 onNameChanged: (String) -> Unit)
+    fun GpsLocationFunctionality(
+        location: Location?,
+        locationTracking: Boolean,
+        onLocationTrackingChanged: (Boolean) -> Unit,
+        name: String,
+        onNameChanged: (String) -> Unit,
+        user: String?,
+        userEmail: String?
+                                 )
     {
         Column (verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxSize().background(color = Color.DarkGray).padding(20.dp)) {
             Row (modifier = Modifier.fillMaxWidth().padding(top = 20.dp)) {
                 Column {
+                    Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().padding(top = 20.dp)) {
+                        Column() {
+                            Row() {
+                                Text(
+                                    text = user ?: "",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 30.sp
+                                )
+                            }
+                            Row() {
+                                Text(
+                                    text = userEmail ?: "",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                        Column() {
+                            Row() {
+                                Button(
+                                    onClick = {val prefs = getSharedPreferences("user_prefs", MODE_PRIVATE)
+                                        prefs.edit { clear() }
+
+                                        val intent =
+                                            Intent(this@MainActivity, MainActivity2::class.java)
+                                        startActivity(intent)
+                                        finish()},
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(10, 130, 220),
+                                    ),
+                                    modifier = Modifier.height(60.dp)
+                                ) {
+                                        Text(
+                                            text = "Log out",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 20.sp
+                                        )
+                                }
+                            }
+                        }
+                    }
                     Row (modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
                         //Nazwa
 
@@ -330,13 +391,4 @@ class MainActivity : ComponentActivity(), LocationListener {
             }
         }
     }
-
-
 }
-
-
-
-
-
-
-
