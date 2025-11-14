@@ -32,12 +32,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.edit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -79,24 +79,27 @@ class MainActivity2 : ComponentActivity() {
                     if (email.isNotEmpty() && password.isNotEmpty()) {
                         isLoading = true
                         CoroutineScope(Dispatchers.IO).launch {
-                            val result = loginUser(email, password)
+                            val result = loginUser(email, password) // Zmieniona funkcja
                             withContext(Dispatchers.Main) {
                                 isLoading = false
                                 if (result.success) {
+                                    // Zapisz dane użytkownika do SharedPreferences
                                     val prefs = getSharedPreferences("user_prefs", MODE_PRIVATE)
-                                    prefs.edit {
+                                    prefs.edit().apply {
                                         putBoolean("logged_in", true)
-                                            .putString("id", result.id)
-                                            .putString("username", result.username)
-                                            .putString("email", result.email)
-                                    }
+                                        putString("id", result.id)
+                                        putString("username", result.username)
+                                        putString("email", result.email)
+                                    }.apply()
 
                                     Toast.makeText(this@MainActivity2, "Zalogowano jako ${result.username}", Toast.LENGTH_SHORT).show()
 
+                                    // Przejdź do MainActivity
                                     val intent = Intent(this@MainActivity2, MainActivity::class.java)
                                     startActivity(intent)
                                     finish()
                                 } else {
+                                    // Pokazanie komunikatu o błędzie
                                     Toast.makeText(this@MainActivity2, result.message, Toast.LENGTH_SHORT).show()
                                 }
                             }
@@ -109,53 +112,65 @@ class MainActivity2 : ComponentActivity() {
         }
     }
 
-    private fun loginUser(email: String, password: String): LoginResult {
-        try {
-            val url = URL("https://gpslocation.fcomms.website/api/loginAndroid.php")
-            val connection = url.openConnection() as HttpURLConnection
-            connection.requestMethod = "POST"
-            connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            connection.setRequestProperty("Accept", "application/json")
-            connection.doInput = true
-            connection.doOutput = true
-            connection.connectTimeout = 10000
-            connection.readTimeout = 10000
+    suspend fun loginUser(email: String, password: String): LoginResult {
+        val url = "https://gpslocation.fcomms.website/api/loginAndroid.php"
+        val params = mapOf(
+            "email" to email,
+            "password" to password
+        )
 
-            val jsonData = """
-            {
-                "email": "$email",
-                "password": "$password"
-            }
-        """.trimIndent()
-
-            val outputStream = connection.outputStream
-            outputStream.write(jsonData.toByteArray(Charsets.UTF_8))
-            outputStream.flush()
-            outputStream.close()
-
-            val responseCode = connection.responseCode
-            if (responseCode == HttpURLConnection.HTTP_OK) {
-                val response = connection.inputStream.bufferedReader().readText()
-                val json = JSONObject(response)
-
-                val success = json.optBoolean("success", false)
-                return if (success) {
-                    val user = json.optJSONObject("user")
-                    val id = user?.optString("id")
-                    val username = user?.optString("username")
-                    val emailResp = user?.optString("email")
-                    LoginResult(true, "Zalogowano", username, emailResp, id)
+        // Zrób zapytanie do API
+        return withContext(Dispatchers.IO) {
+            try {
+                val response = apiRequest(url, params)
+                if (response.getBoolean("success")) {
+                    val user = response.getJSONObject("user")
+                    LoginResult(
+                        success = true,
+                        message = "Zalogowano pomyślnie",
+                        username = user.getString("username"),
+                        email = user.getString("email"),
+                        id = user.getString("id")
+                    )
                 } else {
-                    val message = json.optString("message", "Niepoprawne dane logowania")
-                    LoginResult(false, message)
+                    LoginResult(
+                        success = false,
+                        message = response.getString("message")
+                    )
                 }
-            } else {
-                return LoginResult(false, "Błąd serwera ($responseCode)")
+            } catch (e: Exception) {
+                e.printStackTrace()
+                LoginResult(success = false, message = "Błąd połączenia z serwerem")
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            return LoginResult(false, "Błąd: ${e.message}")
         }
+    }
+
+    fun apiRequest(url: String, params: Map<String, String>): JSONObject {
+        val urlObj = URL(url)
+        val connection = urlObj.openConnection() as HttpURLConnection
+        connection.requestMethod = "POST"
+        connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+        connection.doOutput = true
+
+        // Przygotowanie danych
+        val postData = StringBuilder()
+        for ((key, value) in params) {
+            if (postData.isNotEmpty()) postData.append("&")
+            postData.append(key).append("=").append(value)
+        }
+
+        // Wysłanie danych
+        val outputStream = connection.outputStream
+        outputStream.write(postData.toString().toByteArray())
+        outputStream.flush()
+        outputStream.close()
+
+        // Odczyt odpowiedzi
+        val inputStreamReader = InputStreamReader(connection.inputStream)
+        val response = inputStreamReader.readText()
+        inputStreamReader.close()
+
+        return JSONObject(response)
     }
 
     @Composable
